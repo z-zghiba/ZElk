@@ -1,3 +1,6 @@
+import com.sun.corba.se.spi.orbutil.closure.Closure
+import org.gradle.internal.os.OperatingSystem;
+
 //apply from: 'global.gradle'
 
 description = "The quick way to start ElK"
@@ -9,30 +12,47 @@ buildscript {
         logstashVersion = '7.5.1'
         kibanaVersion = '7.5.1'
 
+        isWindows =  {
+            return OperatingSystem.current().isWindows();
+        }
+        
+        
+        extForOS =  {
+            if (OperatingSystem.current().isLinux()) {
+                return "linux-x86_64.tar.gz";
+            } else if (OperatingSystem.current().isWindows()) {
+                return "windows-x86_64.zip";
+            } else if (OperatingSystem.current().isMacOsX()) {
+                return "darwin-x86_64.tar.gz";
+            } else {
+                return ""; // throw new GradleException('Unknown OS')
+            }
+        }
+        
 
-        utils =  [
-                downloadDir: "${buildDir}/download",
+        utils = [
+                downloadDir   : "${buildDir}/download",
                 extractDirName: "apps",
-                elasticData: "data",
-                elasticLogs: "logs",
+                elasticData   : "data",
+                elasticLogs   : "logs",
         ]
 
         appName = [
-                elasticsearch: "elasticsearch-${elasticsearchVersion}-windows-x86_64.zip",
+                elasticsearch: "elasticsearch-${elasticsearchVersion}-${extForOS()}",
                 logstash     : "logstash-${logstashVersion}.zip",
-                kibana       : "kibana-${kibanaVersion}-windows-x86_64.zip",
-         ]
+                kibana       : "kibana-${kibanaVersion}-${extForOS()}",
+        ]
         appUrl = [
                 elasticsearch: "https://artifacts.elastic.co/downloads/elasticsearch/${appName.elasticsearch}",
-                logstash   : "https://artifacts.elastic.co/downloads/logstash/${appName.logstash}",
+                logstash     : "https://artifacts.elastic.co/downloads/logstash/${appName.logstash}",
                 kibana       : "https://artifacts.elastic.co/downloads/kibana/${appName.kibana}",
-         ]
+        ]
 
         appRepo = [
-                elasticsearch: "${buildDir}/${utils.extractDirName}/${appName.elasticsearch}".replace("-windows-x86_64.zip",""),
-                logstash     : "${buildDir}/${utils.extractDirName}/${appName.logstash}".replace(".zip",""),
-                kibana      : "${buildDir}/${utils.extractDirName}/${appName.kibana}".replace(".zip",""),
-         ]
+                elasticsearch: "${buildDir}/${utils.extractDirName}/${appName.elasticsearch}".replace("-${extForOS()}", ""),
+                logstash     : "${buildDir}/${utils.extractDirName}/${appName.logstash}".replace(".zip", ""),
+                kibana       : "${buildDir}/${utils.extractDirName}/${appName.kibana}".replace(".zip", ""),
+        ]
 
 
     }
@@ -45,11 +65,6 @@ buildscript {
         classpath 'de.undercouch:gradle-download-task:4.0.2'
     }
 }
-
-
-
-
-
 
 
 apply plugin: 'de.undercouch.download'
@@ -72,7 +87,8 @@ task extractES(dependsOn: downloadELK) {
     doLast {
         if (!file("${appRepo.elasticsearch}").exists()) {
             copy {
-                from zipTree("${sourceDir}/${appName.elasticsearch}")
+                def   fileToExtract = (isWindows) ? zipTree("${sourceDir}/${appName.elasticsearch}") : tarTree("${sourceDir}/${appName.elasticsearch}");
+                from fileToExtract
                 into new File(buildDir, "${utils.extractDirName}")
             }
         }
@@ -83,7 +99,8 @@ task extractLS(dependsOn: downloadELK) {
     doLast {
         if (!file("${appRepo.logstash}").exists()) {
             copy {
-                from zipTree("${sourceDir}/${appName.logstash}")
+                def   fileToExtract = (isWindows) ? zipTree("${sourceDir}/${appName.logstash}") : tarTree("${sourceDir}/${appName.logstash}");
+                from fileToExtract
                 into new File(buildDir, "${utils.extractDirName}")
             }
         }
@@ -94,7 +111,8 @@ task extractKibana(dependsOn: downloadELK) {
     doLast {
         if (!file("${appRepo.kibana}").exists()) {
             copy {
-                from zipTree("${sourceDir}/${appName.kibana}")
+                def   fileToExtract = (isWindows) ? zipTree("${sourceDir}/${appName.kibana}") : tarTree("${sourceDir}/${appName.kibana}");
+                from fileToExtract
                 into new File(buildDir, "${utils.extractDirName}")
             }
         }
@@ -139,18 +157,27 @@ task configKibana(dependsOn: extractKibana) {
 
 task runES(type: Exec, dependsOn: configES) {
     workingDir "${appRepo.elasticsearch}/bin"
-    println(workingDir)
-    commandLine 'cmd', '/c', 'elasticsearch.bat'
+    if (isWindows)
+        commandLine 'cmd', '/c', 'elasticsearch.bat'
+    else
+        commandLine './elasticsearch'
 }
 
 task runLS(type: Exec, dependsOn: extractLS) {
     workingDir "${appRepo.logstash}/bin"
-     commandLine 'cmd', '/c', "logstash.bat -f ${projectDir.path}/configuration/logstash.conf"
+    if (isWindows)
+        commandLine 'cmd', '/c', "logstash.bat -f ${projectDir.path}/configuration/logstash.conf"
+    else
+        commandLine "./logstash -f ${projectDir.path}/configuration/logstash.conf"
 }
 
 task runKibana(type: Exec, dependsOn: configKibana) {
     workingDir "${appRepo.kibana}/bin"
-    commandLine 'cmd', '/c', 'kibana.bat'
+    if (isWindows)
+        commandLine 'cmd', '/c', 'kibana.bat'
+    else
+        commandLine './kibana'
+
 }
 
 
@@ -162,8 +189,6 @@ task printTasks() {
             }
     }
 }
-
-
 
 def static updateFile(file, Closure processText) {
     def text = file.text
