@@ -1,6 +1,6 @@
 //apply from: 'global.gradle'
 
-description = "ELK stacks"
+description = "The quick way to start ElK"
 version = '1.0.1'
 
 buildscript {
