@@ -1,0 +1,171 @@
+//apply from: 'global.gradle'
+
+description = "ELK stacks"
+version = '1.0.1'
+
+buildscript {
+    ext {
+        elasticsearchVersion = '7.5.1'
+        logstashVersion = '7.5.1'
+        kibanaVersion = '7.5.1'
+
+
+        utils =  [
+                downloadDir: "${buildDir}/download",
+                extractDirName: "apps",
+                elasticData: "data",
+                elasticLogs: "logs",
+        ]
+
+        appName = [
+                elasticsearch: "elasticsearch-${elasticsearchVersion}-windows-x86_64.zip",
+                logstash     : "logstash-${logstashVersion}.zip",
+                kibana       : "kibana-${kibanaVersion}-windows-x86_64.zip",
+         ]
+        appUrl = [
+                elasticsearch: "https://artifacts.elastic.co/downloads/elasticsearch/${appName.elasticsearch}",
+                logstash   : "https://artifacts.elastic.co/downloads/logstash/${appName.logstash}",
+                kibana       : "https://artifacts.elastic.co/downloads/kibana/${appName.kibana}",
+         ]
+
+        appRepo = [
+                elasticsearch: "${buildDir}/${utils.extractDirName}/${appName.elasticsearch}".replace("-windows-x86_64.zip",""),
+                logstash     : "${buildDir}/${utils.extractDirName}/${appName.logstash}".replace(".zip",""),
+                kibana      : "${buildDir}/${utils.extractDirName}/${appName.kibana}".replace(".zip",""),
+         ]
+
+
+    }
+
+
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'de.undercouch:gradle-download-task:4.0.2'
+    }
+}
+
+
+
+
+
+
+
+apply plugin: 'de.undercouch.download'
+def sourceDir = new File(buildDir, 'download')
+sourceDir.mkdirs()
+
+task downloadELK(type: Download) {
+    src([
+            "${appUrl.elasticsearch}",
+            "${appUrl.logstash}",
+            "${appUrl.kibana}",
+    ])
+
+    dest "${utils.downloadDir}"
+    overwrite false
+}
+
+
+task extractES(dependsOn: downloadELK) {
+    doLast {
+        if (!file("${appRepo.elasticsearch}").exists()) {
+            copy {
+                from zipTree("${sourceDir}/${appName.elasticsearch}")
+                into new File(buildDir, "${utils.extractDirName}")
+            }
+        }
+    }
+}
+
+task extractLS(dependsOn: downloadELK) {
+    doLast {
+        if (!file("${appRepo.logstash}").exists()) {
+            copy {
+                from zipTree("${sourceDir}/${appName.logstash}")
+                into new File(buildDir, "${utils.extractDirName}")
+            }
+        }
+    }
+}
+
+task extractKibana(dependsOn: downloadELK) {
+    doLast {
+        if (!file("${appRepo.kibana}").exists()) {
+            copy {
+                from zipTree("${sourceDir}/${appName.kibana}")
+                into new File(buildDir, "${utils.extractDirName}")
+            }
+        }
+    }
+}
+
+
+task configES(dependsOn: extractES) {
+    doLast {
+        def configFile = new File("${appRepo.elasticsearch}/config/elasticsearch.yml")
+
+        if (configFile.exists()) {
+            def dataDir = new File("${appRepo.elasticsearch}", "${utils.elasticData}")
+            dataDir.mkdirs()
+
+            def logDir = new File("${appRepo.elasticsearch}", "${utils.elasticLogs}")
+            logDir.mkdirs()
+
+            updateFile(configFile) { text ->
+                text = text.replace('#network.host: 192.168.0.1', 'network.host: localhost')
+                text = text.replace('#http.port: 9200', 'http.port: 9200')
+                text = text.replace('#path.data: /path/to/data', "path.data: ${dataDir}")
+                text.replace('#path.logs: /path/to/logs', "path.logs: ${logDir}")
+            }
+        }
+    }
+}
+
+task configKibana(dependsOn: extractKibana) {
+    doLast {
+        def configFile = new File("${appRepo.kibana}/config/kibana.yml")
+
+        if (configFile.exists()) {
+            updateFile(configFile) { text ->
+                text = text.replace('#server.host: "localhost"', 'server.host: "localhost"')
+                text = text.replace('#server.port: 5601', 'server.port: 5601')
+                text.replace('#elasticsearch.url: "http://localhost:9200"', 'elasticsearch.url: "http://localhost:9200"')
+            }
+        }
+    }
+}
+
+task runES(type: Exec, dependsOn: configES) {
+    workingDir "${appRepo.elasticsearch}/bin"
+    println(workingDir)
+    commandLine 'cmd', '/c', 'elasticsearch.bat'
+}
+
+task runLS(type: Exec, dependsOn: extractLS) {
+    workingDir "${appRepo.logstash}/bin"
+     commandLine 'cmd', '/c', "logstash.bat -f ${projectDir.path}/configuration/logstash.conf"
+}
+
+task runKibana(type: Exec, dependsOn: configKibana) {
+    workingDir "${appRepo.kibana}/bin"
+    commandLine 'cmd', '/c', 'kibana.bat'
+}
+
+
+task printTasks() {
+    project.tasks.collect {
+        task ->
+            if (!task.group && task.name != 'printTasks') {
+                println task.name
+            }
+    }
+}
+
+
+
+def static updateFile(file, Closure processText) {
+    def text = file.text
+    file.write(processText(text))
+}
